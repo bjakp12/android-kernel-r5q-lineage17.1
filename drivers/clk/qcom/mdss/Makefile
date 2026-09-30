@@ -1,4 +1,5 @@
 ccflags-y := -Iinclude/drm -Idrivers/gpu/drm/msm -Idrivers/gpu/drm/msm/dsi-staging
+ccflags-y += -Idrivers/clk/qcom/mdss
 ccflags-$(CONFIG_DRM_MSM_DSI) += -Idrivers/gpu/drm/msm/dsi
 ccflags-y += -Idrivers/gpu/drm/msm/sde
 ccflags-$(CONFIG_DISPLAY_SAMSUNG) += -Idrivers/gpu/drm/msm/samsung
