@@ -68,8 +68,8 @@ jobs:
           grep -E "CONFIG_LOCALVERSION=|CONFIG_DEFAULT_HOSTNAME|CONFIG_HZ=|CONFIG_CPU_FREQ_DEFAULT_GOV|CONFIG_DEFAULT_TCP_CONG" .config || true
           cp .config arch/arm64/configs/${{ env.DEFCONFIG }}
 
-      - name: Toolchain diagnostics + select (verbose probe)
-        id: tc
+      - name: Probe Proton Clang
+        id: probe
         run: |
           export PATH="$GITHUB_WORKSPACE/proton/bin:$PATH"
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/proton/lib:$LD_LIBRARY_PATH"
@@ -78,11 +78,54 @@ jobs:
           if echo 'int probe_stackprotector(void){return 0;}' | \
             clang --target=aarch64-linux-gnu --prefix=/usr/bin/ --gcc-toolchain=/usr \
               -fno-integrated-as -O2 -fstack-protector-strong -x c - -c -o /dev/null -v; then
+            echo "proton_ok=true" >> "$GITHUB_OUTPUT"
+            echo "Proton probe: PASS"
+          else
+            echo "proton_ok=false" >> "$GITHUB_OUTPUT"
+            echo "Proton probe: FAIL (see error above)"
+          fi
+
+      - name: Setup Lineage Clang r416183b (AOSP LLVM, kernel prebuilt)
+        id: aosp
+        if: steps.probe.outputs.proton_ok != 'true'
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          if [ ! -x "$GITHUB_WORKSPACE/aosp-clang/bin/clang" ]; then
+            rm -rf "$GITHUB_WORKSPACE/aosp-clang"
+            if git clone --depth 1 -b lineage-20.0 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git aosp-clang; then
+              echo "AOSP clone OK"
+            else
+              echo "AOSP clone FAILED"
+            fi
+          fi
+          export PATH="$GITHUB_WORKSPACE/aosp-clang/bin:$PATH"
+          if "$GITHUB_WORKSPACE/aosp-clang/bin/clang" --version; then
+            if echo 'int probe_stackprotector(void){return 0;}' | \
+              "$GITHUB_WORKSPACE/aosp-clang/bin/clang" --target=aarch64-linux-gnu --prefix=/usr/bin/ --gcc-toolchain=/usr \
+                -fno-integrated-as -O2 -fstack-protector-strong -x c - -c -o /dev/null; then
+              echo "aosp_ok=true" >> "$GITHUB_OUTPUT"
+              echo "AOSP probe: PASS"
+            else
+              echo "aosp_ok=false" >> "$GITHUB_OUTPUT"
+              echo "AOSP probe: FAIL (see error above)"
+            fi
+          else
+            echo "aosp_ok=false" >> "$GITHUB_OUTPUT"
+            echo "AOSP clang binary broken/missing"
+          fi
+
+      - name: Toolchain diagnostics + select (verbose probe)
+        id: tc
+        run: |
+          if [ "${{ steps.probe.outputs.proton_ok }}" = "true" ]; then
             echo "toolchain=proton" >> "$GITHUB_OUTPUT"
             echo "Selected toolchain: Proton Clang"
+          elif [ "${{ steps.aosp.outputs.aosp_ok }}" = "true" ]; then
+            echo "toolchain=aosp" >> "$GITHUB_OUTPUT"
+            echo "Selected toolchain: Lineage/AOSP Clang r416183b"
           else
             echo "toolchain=gcc" >> "$GITHUB_OUTPUT"
-            echo "Selected toolchain: GCC fallback (Proton probe failed, see error above)"
+            echo "Selected toolchain: GCC fallback (no working Clang)"
           fi
 
       - name: Build kernel (Proton Clang preferred, GCC fallback)
@@ -91,7 +134,7 @@ jobs:
           export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
           export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
           # -Wno-error=implicit-*: Clang >=16 menjadikan ini error; code 4.14 butuh diturunkan ke warning.
-          # Flag ini valid juga untuk GCC jadi dipakai di kedua jalur.
+          # Flag ini valid juga untuk GCC jadi dipakai di semua jalur.
           export KCFLAGS="-O2 -fno-pic -fno-pie -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
           # -fcommon: GCC >=10 default -fno-common, dtc era 4.14 (yylloc di
           # lexer+parser) gagal link tanpa ini. Hanya untuk HOST tools.
@@ -109,14 +152,18 @@ jobs:
               KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" \
               Image.gz-dtb 2>&1 | tee build.log
           else
-            echo "=== Building with Proton Clang ==="
-            export PATH="$GITHUB_WORKSPACE/proton/bin:$PATH"
-            export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/proton/lib:$LD_LIBRARY_PATH"
+            if [ "${{ steps.tc.outputs.toolchain }}" = "aosp" ]; then
+              echo "=== Building with Lineage/AOSP Clang r416183b ==="
+              export PATH="$GITHUB_WORKSPACE/aosp-clang/bin:$PATH"
+            else
+              echo "=== Building with Proton Clang ==="
+              export PATH="$GITHUB_WORKSPACE/proton/bin:$PATH"
+              export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/proton/lib:$LD_LIBRARY_PATH"
+            fi
             export CLANG_TRIPLE="aarch64-linux-gnu-"
             make -j$(nproc) ARCH=arm64 \
               "$HOSTCFLAGS_ARG" \
               CC="clang" \
-              AR="llvm-ar" NM="llvm-nm" OBJCOPY="llvm-objcopy" OBJDUMP="llvm-objdump" STRIP="llvm-strip" \
               CLANG_TRIPLE="aarch64-linux-gnu-" \
               CROSS_COMPILE="aarch64-linux-gnu-" \
               CROSS_COMPILE_ARM32="arm-linux-gnueabi-" \

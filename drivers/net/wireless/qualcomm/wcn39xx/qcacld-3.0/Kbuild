@@ -1658,6 +1658,12 @@ ccflags-y += $(INCS)
 cppflags-y +=	-DANI_OS_TYPE_ANDROID=6 \
 		-Wall\
 		-Werror\
+		-Wno-error=address-of-packed-member\
+		-Wno-error=misleading-indentation\
+		-Wno-error=format-overflow\
+		-Wno-error=stringop-overflow\
+		-Wno-error=array-bounds\
+		-Wno-error=restrict\
 		-D__linux__
 
 cppflags-$(CONFIG_PTT_SOCK_SVC_ENABLE) += -DPTT_SOCK_SVC_ENABLE
