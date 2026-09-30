@@ -2,7 +2,7 @@ name: Ancient-LTS R5Q (SM8150)
 
 on:
   push:
-    branches: [ lineage-17.1, main, master ]
+    branches: [ lineage-17.1, main, master, ancient-lts-r5q ]
   pull_request:
   workflow_dispatch:
 
