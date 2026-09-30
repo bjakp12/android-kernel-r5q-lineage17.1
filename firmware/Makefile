@@ -18,7 +18,10 @@ fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771) += tsp_sec/y761_beyond0_phole.bin 
 fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771_D) += tsp_sec/y771_d1.bin tsp_sec/y771_d2.bin \
 						tsp_sec/y771_d1_bringup.bin tsp_sec/y771_davinci_bringup.bin tsp_sec/y771_davinci_bringup2nd.bin
 fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y761_SUB) += tsp_sec/y761_winner.bin
-fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771_R5) += tsp_sec/y771_r5.bin tsp_sec/y771_r5_1l.bin
+# Ancient-LTS: tsp_sec blobs are proprietary and absent from the tree.
+# The Y771_R5 touchscreen driver stays enabled and loads firmware from
+# /vendor/firmware at runtime (standard on Lineage), so do NOT embed.
+# (was: fw-external-$(CONFIG_TOUCHSCREEN_SEC_TS_Y771_R5) += tsp_sec/y771_r5.bin tsp_sec/y771_r5_1l.bin)
 
 fw-external-$(CONFIG_TOUCHSCREEN_FTS9)	+= tsp_stm/fts9cu80f_winner.fw
 fw-external-$(CONFIG_TOUCHSCREEN_FTS9CU80F_B)	+= tsp_stm/fts9cu80f_bloom.fw
