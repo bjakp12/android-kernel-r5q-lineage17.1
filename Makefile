@@ -928,7 +928,9 @@ KBUILD_CFLAGS   += $(call cc-option,-fconserve-stack)
 KBUILD_CFLAGS   += $(call cc-option,-Werror=implicit-int)
 
 # require functions to have arguments in prototypes, not empty 'int foo()'
-KBUILD_CFLAGS   += $(call cc-option,-Werror=strict-prototypes)
+# Ancient-LTS: downgraded from -Werror=strict-prototypes. Samsung 4.14
+# tree has many legacy () declarations; keep the warning, not the error.
+KBUILD_CFLAGS   += $(call cc-option,-Wstrict-prototypes)
 
 # Prohibit date/time macros, which would make the build non-deterministic
 KBUILD_CFLAGS   += $(call cc-option,-Werror=date-time)

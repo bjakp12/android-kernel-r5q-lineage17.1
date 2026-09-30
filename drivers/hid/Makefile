@@ -2,6 +2,8 @@
 #
 # Makefile for the HID driver
 #
+# Ancient-LTS: self -I so hid-trace.h re-include via define_trace.h resolves.
+ccflags-y += -Idrivers/hid
 hid-y			:= hid-core.o hid-input.o
 hid-$(CONFIG_DEBUG_FS)		+= hid-debug.o
 

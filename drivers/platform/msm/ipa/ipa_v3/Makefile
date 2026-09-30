@@ -1,5 +1,8 @@
 obj-$(CONFIG_IPA3) += ipahal/
 
+# Ancient-LTS: self -I so ipa_trace.h re-include via define_trace.h resolves.
+ccflags-y += -Idrivers/platform/msm/ipa/ipa_v3
+
 obj-$(CONFIG_IPA3) += ipat.o
 ipat-y := ipa.o ipa_debugfs.o ipa_hdr.o ipa_flt.o ipa_rt.o ipa_dp.o ipa_client.o \
 	ipa_utils.o ipa_nat.o ipa_intf.o teth_bridge.o ipa_interrupts.o \
