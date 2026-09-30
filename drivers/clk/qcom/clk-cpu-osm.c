@@ -43,6 +43,15 @@
 #include "clk-voter.h"
 #include "clk-debug.h"
 
+/* Ancient-LTS: global CPU undervolt for SM8150 (SD855 / r5q).
+ * -80mV on every cluster (Little / Big / Prime).
+ * Voltages come from the OSM LUT fused in hardware, there is no
+ * opp-microvolt in sm8150.dtsi, so this is the only safe place.
+ * Floor at 550mV to avoid bootloop on weak bins.
+ */
+#define ANCIENT_LTS_UV_OFFSET_MV	80
+#define ANCIENT_LTS_MIN_VOLT_MV		550
+
 #define OSM_INIT_RATE			300000000UL
 #define XO_RATE				19200000UL
 #define OSM_TABLE_SIZE			40
@@ -959,7 +968,22 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 		data = clk_osm_read_reg(c, VOLT_REG + i * OSM_REG_SIZE);
 		c->osm_table[i].virtual_corner =
 					((data & GENMASK(21, 16)) >> 16);
-		c->osm_table[i].open_loop_volt = (data & GENMASK(11, 0));
+		{
+			u16 stock_mv = (data & GENMASK(11, 0));
+			u16 uv_mv;
+
+			if (stock_mv > (ANCIENT_LTS_MIN_VOLT_MV +
+					 ANCIENT_LTS_UV_OFFSET_MV))
+				uv_mv = stock_mv - ANCIENT_LTS_UV_OFFSET_MV;
+			else
+				uv_mv = ANCIENT_LTS_MIN_VOLT_MV;
+
+			c->osm_table[i].open_loop_volt = uv_mv;
+			pr_info("Ancient-LTS UV: idx %u %lu Hz %u mV -> %u mV (vc %u)\n",
+				i, c->osm_table[i].frequency,
+				stock_mv, uv_mv,
+				c->osm_table[i].virtual_corner);
+		}
 
 		pr_debug("index=%d freq=%ld virtual_corner=%d open_loop_voltage=%u\n",
 			 i, c->osm_table[i].frequency,
