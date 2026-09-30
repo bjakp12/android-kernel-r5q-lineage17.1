@@ -48,9 +48,20 @@
  * Voltages come from the OSM LUT fused in hardware, there is no
  * opp-microvolt in sm8150.dtsi, so this is the only safe place.
  * Floor at 550mV to avoid bootloop on weak bins.
+ *
+ * Ancient-LTS OC: Big -> 2.496 GHz (req 2.5), Prime -> 3.0912 GHz
+ * (req 3.1). OSM step is 19.2 MHz (XO) so exact 2.5/3.1 is
+ * unreachable; nearest LVAL below request is used. OC rewrites the
+ * top LUT entry and verifies by readback (skipped if XBL locked the
+ * LUT). OC bin runs stock_top + 25 mV (exempt from UV); all other
+ * bins keep -80mV.
  */
 #define ANCIENT_LTS_UV_OFFSET_MV	80
 #define ANCIENT_LTS_MIN_VOLT_MV		550
+#define ANCIENT_OC_BIG_HZ		2496000000UL
+#define ANCIENT_OC_PRIME_HZ		3091200000UL
+#define ANCIENT_OC_VOLT_BUMP_MV		25
+#define ANCIENT_OC_MAX_VOLT_MV		1050
 
 #define OSM_INIT_RATE			300000000UL
 #define XO_RATE				19200000UL
@@ -994,6 +1005,58 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 				c->osm_table[i].frequency ==
 				c->osm_table[i - 1].frequency)
 			j = i;
+	}
+
+	/* Ancient-LTS OC: rewrite top LUT entry for Big (cluster 2) and
+	 * Prime (cluster 3). Little (cluster 1) stays stock + UV.
+	 */
+	if (j > 0 && (c->cluster_num == 2 || c->cluster_num == 3)) {
+		unsigned long oc_hz = (c->cluster_num == 3) ?
+			ANCIENT_OC_PRIME_HZ : ANCIENT_OC_BIG_HZ;
+		u32 top = j - 1;
+		u32 freq_off = FREQ_REG + top * OSM_REG_SIZE;
+		u32 volt_off = VOLT_REG + top * OSM_REG_SIZE;
+		u32 freq_val = clk_osm_read_reg(c, freq_off);
+		u32 stock_src = (freq_val & GENMASK(31, 30)) >> 30;
+		u32 oc_lval = oc_hz / XO_RATE;
+		/* Top bins are ~900mV+, never hit the 550mV UV floor,
+		 * so adding the offset back recovers the stock volt.
+		 */
+		u16 stock_top_mv = c->osm_table[top].open_loop_volt +
+			ANCIENT_LTS_UV_OFFSET_MV;
+		u16 oc_mv = stock_top_mv + ANCIENT_OC_VOLT_BUMP_MV;
+		u32 new_freq, new_volt;
+
+		if (!stock_src)
+			pr_warn("Ancient-LTS OC: cluster %u top src fixed, skip\n",
+				c->cluster_num);
+		else if (oc_lval * XO_RATE != oc_hz || oc_lval > 255)
+			pr_warn("Ancient-LTS OC: bad lval %u, skip\n", oc_lval);
+		else if (c->osm_table[top].frequency >= oc_hz)
+			pr_info("Ancient-LTS OC: cluster %u already >= %lu Hz, skip\n",
+				c->cluster_num, oc_hz);
+		else if (oc_mv > ANCIENT_OC_MAX_VOLT_MV)
+			pr_warn("Ancient-LTS OC: %u mV exceeds %u mV cap, skip\n",
+				oc_mv, ANCIENT_OC_MAX_VOLT_MV);
+		else {
+			new_freq = (freq_val & ~GENMASK(7, 0)) |
+				(oc_lval & GENMASK(7, 0));
+			new_volt = ((u32)c->osm_table[top].virtual_corner << 16) |
+				oc_mv;
+			clk_osm_write_reg(c, new_freq, freq_off);
+			clk_osm_write_reg(c, new_volt, volt_off);
+			clk_osm_mb(c);
+			if (clk_osm_read_reg(c, freq_off) == new_freq &&
+			    clk_osm_read_reg(c, volt_off) == new_volt) {
+				c->osm_table[top].frequency = oc_hz;
+				c->osm_table[top].open_loop_volt = oc_mv;
+				pr_info("Ancient-LTS OC: cluster %u top -> %lu Hz @ %u mV (stock top %u mV)\n",
+					c->cluster_num, oc_hz, oc_mv,
+					stock_top_mv);
+			} else {
+				pr_warn("Ancient-LTS OC: LUT locked by XBL, keeping stock+UV\n");
+			}
+		}
 	}
 
 	osm_clks_init[c->cluster_num].rate_max = devm_kcalloc(&pdev->dev,
