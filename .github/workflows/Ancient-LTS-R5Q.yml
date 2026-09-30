@@ -70,12 +70,14 @@ jobs:
 
       - name: Build with Proton Clang + latency opts (battery-safe)
         run: |
+          set -o pipefail
           export PATH="$GITHUB_WORKSPACE/proton/bin:$PATH"
           export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
           export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
           # Optimasi: O2 (via defconfig) + mcpu A76/A55, LTO ringan dimatikan agar hemat baterai & stabil di 4.14.
           # Polly + ThinLTO sengaja TIDAK dipakai penuh di 4.14 Samsung agar tidak boros / bootloop.
-          export KCFLAGS="-O2 -mcpu=cortex-a76.cortex-a55 -mtune=cortex-a76.cortex-a55 -fno-pic -fno-pie"
+          # -Wno-error=implicit-*: Clang >=16 menjadikan ini error; code 4.14 butuh diturunkan ke warning.
+          export KCFLAGS="-O2 -mcpu=cortex-a76.cortex-a55 -mtune=cortex-a76.cortex-a55 -fno-pic -fno-pie -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
           export KAFLAGS="-mcpu=cortex-a76.cortex-a55"
           export CLANG_TRIPLE="aarch64-linux-gnu-"
           export CROSS_COMPILE="aarch64-linux-gnu-"
@@ -91,7 +93,15 @@ jobs:
             KBUILD_BUILD_USER="$KBUILD_BUILD_USER" \
             KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" \
             Image.gz-dtb 2>&1 | tee build.log
-          ls -lh arch/arm64/boot/Image* arch/arm64/boot/dts/qcom/*.dtb 2>/dev/null || true
+
+      - name: Show build outputs (always)
+        if: always()
+        run: |
+          ls -lh arch/arm64/boot/ || true
+          echo "--- dtbs ---"
+          find arch/arm64/boot -name "*.dtb" || true
+          echo "--- tail build.log ---"
+          tail -n 80 build.log || true
           echo "=== version ==="
           strings arch/arm64/boot/Image.gz-dtb 2>/dev/null | grep -m2 "Linux version" || true
           echo "=== compile by/host ==="
@@ -100,7 +110,11 @@ jobs:
       - name: Package AnyKernel3 (optional)
         if: success()
         run: |
-          if [ ! -f arch/arm64/boot/Image.gz-dtb ]; then echo "Image.gz-dtb missing"; exit 1; fi
+          if [ ! -f arch/arm64/boot/Image.gz-dtb ]; then
+            echo "Image.gz-dtb missing, build gagal. Lihat build.log di Artifacts."
+            ls -lh arch/arm64/boot/
+            exit 1
+          fi
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3 || true
           cp arch/arm64/boot/Image.gz-dtb AnyKernel3/
           cd AnyKernel3
@@ -110,7 +124,7 @@ jobs:
           ls -lh ../*.zip || true
 
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: always()
         with:
           name: Ancient-LTS-R5Q
           path: |
