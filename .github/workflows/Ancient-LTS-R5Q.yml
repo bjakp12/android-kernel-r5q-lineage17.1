@@ -93,12 +93,16 @@ jobs:
           # -Wno-error=implicit-*: Clang >=16 menjadikan ini error; code 4.14 butuh diturunkan ke warning.
           # Flag ini valid juga untuk GCC jadi dipakai di kedua jalur.
           export KCFLAGS="-O2 -fno-pic -fno-pie -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
+          # -fcommon: GCC >=10 default -fno-common, dtc era 4.14 (yylloc di
+          # lexer+parser) gagal link tanpa ini. Hanya untuk HOST tools.
+          export HOSTCFLAGS_ARG='HOSTCFLAGS=-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon'
           export CROSS_COMPILE="aarch64-linux-gnu-"
           export CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
           if [ "${{ steps.tc.outputs.toolchain }}" = "gcc" ]; then
             echo "=== Building with GCC (Ubuntu cross-toolchain, fallback) ==="
             aarch64-linux-gnu-gcc --version | head -n1
             make -j$(nproc) ARCH=arm64 \
+              "$HOSTCFLAGS_ARG" \
               CROSS_COMPILE="aarch64-linux-gnu-" \
               CROSS_COMPILE_ARM32="arm-linux-gnueabi-" \
               KBUILD_BUILD_USER="$KBUILD_BUILD_USER" \
@@ -110,6 +114,7 @@ jobs:
             export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/proton/lib:$LD_LIBRARY_PATH"
             export CLANG_TRIPLE="aarch64-linux-gnu-"
             make -j$(nproc) ARCH=arm64 \
+              "$HOSTCFLAGS_ARG" \
               CC="clang" \
               AR="llvm-ar" NM="llvm-nm" OBJCOPY="llvm-objcopy" OBJDUMP="llvm-objdump" STRIP="llvm-strip" \
               CLANG_TRIPLE="aarch64-linux-gnu-" \
