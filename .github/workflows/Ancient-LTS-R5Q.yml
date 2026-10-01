@@ -21,7 +21,9 @@ jobs:
       - name: Checkout kernel
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Ancient-LTS: full history so in-tree git version scripts
+          # (e.g. qcacld `git log <sha>~..HEAD`) don't fail on shallow clones.
+          fetch-depth: 0
 
       - name: Install deps
         run: |

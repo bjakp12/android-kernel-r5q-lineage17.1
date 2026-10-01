@@ -1687,6 +1687,12 @@ endif
 ifeq ($(call cc-option-yn, -Wmaybe-uninitialized),y)
 cppflags-y += -Wno-error=maybe-uninitialized
 endif
+ifeq ($(call cc-option-yn, -Wvoid-pointer-to-enum-cast),y)
+cppflags-y += -Wno-error=void-pointer-to-enum-cast
+endif
+ifeq ($(call cc-option-yn, -Wvoid-pointer-to-int-cast),y)
+cppflags-y += -Wno-error=void-pointer-to-int-cast
+endif
 
 cppflags-$(CONFIG_PTT_SOCK_SVC_ENABLE) += -DPTT_SOCK_SVC_ENABLE
 cppflags-$(CONFIG_FEATURE_WLAN_WAPI) += -DFEATURE_WLAN_WAPI

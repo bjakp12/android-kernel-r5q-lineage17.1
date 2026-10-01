@@ -193,6 +193,9 @@ endif
 ifeq ($(call cc-option-yn, -Warray-parameter),y)
 CDEFINES += -Wno-error=array-parameter
 endif
+ifeq ($(call cc-option-yn, -Wmaybe-uninitialized),y)
+CDEFINES += -Wno-error=maybe-uninitialized
+endif
 
 KBUILD_CPPFLAGS += $(CDEFINES)
 
