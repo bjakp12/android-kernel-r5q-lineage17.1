@@ -45,14 +45,14 @@
 #include "clk-debug.h"
 
 /* Ancient-LTS power tweaks for SM8150 (SD855 / r5q).
- * Apply a verified -70 mV global CPU undervolt. The 550 mV floor keeps
- * the lowest OSM bins within their stable operating range.
- */
-#define ANCIENT_LTS_UV_OFFSET_MV	70
+ * Apply a -100 mV global CPU undervolt. Aggressive for SD855 silicon
+ * lottery; the 550 mV floor keeps the lowest OSM bins from going too low.
+  */
+#define ANCIENT_LTS_UV_OFFSET_MV	100
 #define ANCIENT_LTS_OC_ENABLE		1
 #define ANCIENT_LTS_MIN_VOLT_MV		550
-#define ANCIENT_OC_BIG_HZ		2496000000UL
-#define ANCIENT_OC_PRIME_HZ		2956800000UL
+#define ANCIENT_OC_BIG_HZ		2688000000UL
+#define ANCIENT_OC_PRIME_HZ		3091200000UL
 
 #define OSM_INIT_RATE			300000000UL
 #define XO_RATE				19200000UL
@@ -612,13 +612,15 @@ osm_set_index(struct clk_osm *c, unsigned int index, unsigned int num)
  * is selected. The OSM LUT (FREQ_REG/VOLT_REG) is locked by XBL on r5q,
  * so probe-time LUT rewrites never stick; the PLL L/MODE registers stay
  * writable at runtime. Method proven by Pealeap r5q tree ("2.96GHz best"):
- * Big -> 2.496 GHz (LVAL 130), Prime -> 2.9568 GHz (LVAL 154, 855+ bin).
+ * Big -> 2.688 GHz (LVAL 140, nearest step below 2.7),
+ * Prime -> 3.0912 GHz (LVAL 161, nearest step below 3.1).
+ * OSM step is 19.2 MHz so exact 2.7/3.1 is unreachable.
  */
 #define ANCIENT_OC_PLL_L_VAL	0x04
 #define ANCIENT_OC_PLL_MODE	0x00
 #define ANCIENT_OC_UPDATE	BIT(22)
-#define ANCIENT_OC_BIG_KHZ	2496000
-#define ANCIENT_OC_PRIME_KHZ	2956800
+#define ANCIENT_OC_BIG_KHZ	2688000
+#define ANCIENT_OC_PRIME_KHZ	3091200
 
 static int
 osm_cpufreq_target_index(struct cpufreq_policy *policy, unsigned int index)
@@ -632,9 +634,9 @@ osm_cpufreq_target_index(struct cpufreq_policy *policy, unsigned int index)
 		u32 oc_lval = 0;
 
 		if (freq == ANCIENT_OC_BIG_KHZ)
-			oc_lval = 130;
+			oc_lval = 140;
 		else if (freq == ANCIENT_OC_PRIME_KHZ)
-			oc_lval = 154;
+			oc_lval = 161;
 
 		if (oc_lval) {
 			u32 mode;
@@ -1108,7 +1110,7 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 	c->num_entries = osm_clks_init[c->cluster_num].num_rate_max = j;
 #if ANCIENT_LTS_OC_ENABLE
 	/* Ancient-LTS: prove the OC label reached the software rate table.
-	 * Big (2) must end at 2496000000, Prime (3) at 2956800000.
+	 * Big (2) must end at 2688000000, Prime (3) at 3091200000.
 	 */
 	if (j > 0 && (c->cluster_num == 2 || c->cluster_num == 3))
 		pr_info("Ancient-LTS OC: cluster %u rate_max top %lu Hz (%u entries)\n",
