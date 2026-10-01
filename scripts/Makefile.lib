@@ -310,9 +310,12 @@ $(obj)/%.dtb.S: $(obj)/%.dtb
 	$(call cmd,dt_S_dtb)
 
 ifneq ($(DTC_EXT),)
-DTC = $(DTC_EXT) -q 
+DTC = $(DTC_EXT) -q
 else
-DTC = $(srctree)/tools/dtc
+# Ancient-LTS: tools/dtc is a Samsung prebuilt that loses +x via git on
+# some checkouts (100644). Prefer it when executable, else use the
+# in-tree scripts/dtc/dtc built by Kbuild (standard upstream path).
+DTC = $(shell if test -x $(srctree)/tools/dtc; then echo $(srctree)/tools/dtc; else echo $(objtree)/scripts/dtc/dtc; fi)
 endif
 
 quiet_cmd_dtc = DTC     $@

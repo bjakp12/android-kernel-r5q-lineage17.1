@@ -269,9 +269,16 @@ jobs:
             run_test "minus -Werror sanity (expects PASS)" $T $P $G $NIA $COMMON -mlittle-endian -Wno-error
           } | tee clang-debug.log
 
+      - name: Ensure tools/dtc executable (Samsung prebuilt loses +x)
+        run: |
+          chmod +x tools/dtc || true
+          ls -l tools/dtc || true
+          ./tools/dtc --version 2>&1 | head -n3 || echo "(tools/dtc not runnable, Makefile.lib falls back to scripts/dtc/dtc)"
+
       - name: Build kernel (Clang first, auto-switch to GCC on error)
         run: |
           set -o pipefail
+          chmod +x tools/dtc || true
           export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
           export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
           # -Wno-error=implicit-*: Clang >=16 menjadikan ini error; code 4.14 butuh diturunkan ke warning.
