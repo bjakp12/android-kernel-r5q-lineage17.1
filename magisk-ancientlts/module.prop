@@ -1,0 +1,6 @@
+id=ancientlts_r5q_kernel
+name=Ancient-LTS R5Q Kernel
+version=v1.0-DEV
+versionCode=100
+author=bjakp12
+description=Ancient-LTS kernel for Galaxy S10 Lite (r5q, SM8150): -80mV UV, OC Big 2.496GHz / Prime 3.0912GHz. Patches kernel into live boot.img via magiskboot; Magisk root preserved.
