@@ -999,58 +999,71 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 			j = i;
 	}
 
-	/* Ancient-LTS OC: rewrite top LUT entry for Big (cluster 2) and
-	 * Prime (cluster 3). Little (cluster 1) stays stock + UV.
-	 */
-	/* Ancient-LTS OC: disabled for bring-up (ANCIENT_LTS_OC_ENABLE=0).
-	 * Enable only after a stable stock boot.
+	/* Ancient-LTS OC: update the top duplicate LUT pair for Big (cluster 2)
+	 * and Prime (cluster 3). cpufreq uses this pair to identify the boost
+	 * entry, so both slots must retain the same frequency.
 	 */
 #if ANCIENT_LTS_OC_ENABLE
-	if (j > 0 && (c->cluster_num == 2 || c->cluster_num == 3)) {
+	if (j > 0 && j < c->osm_table_size &&
+	    (c->cluster_num == 2 || c->cluster_num == 3)) {
 		unsigned long oc_hz = (c->cluster_num == 3) ?
 			ANCIENT_OC_PRIME_HZ : ANCIENT_OC_BIG_HZ;
 		u32 top = j - 1;
+		u32 twin = j;
 		u32 freq_off = FREQ_REG + top * OSM_REG_SIZE;
 		u32 volt_off = VOLT_REG + top * OSM_REG_SIZE;
+		u32 twin_freq_off = FREQ_REG + twin * OSM_REG_SIZE;
+		u32 twin_volt_off = VOLT_REG + twin * OSM_REG_SIZE;
 		u32 freq_val = clk_osm_read_reg(c, freq_off);
+		u32 volt_val = clk_osm_read_reg(c, volt_off);
+		u32 twin_freq_val = clk_osm_read_reg(c, twin_freq_off);
+		u32 twin_volt_val = clk_osm_read_reg(c, twin_volt_off);
 		u32 stock_src = (freq_val & GENMASK(31, 30)) >> 30;
+		u32 twin_stock_src = (twin_freq_val & GENMASK(31, 30)) >> 30;
 		u32 oc_lval = oc_hz / XO_RATE;
-		/* Top bins are ~900mV+, never hit the 550mV UV floor,
-		 * so adding the offset back recovers the stock volt.
-		 */
-		u16 stock_top_mv = c->osm_table[top].open_loop_volt +
-			ANCIENT_LTS_UV_OFFSET_MV;
+		u16 stock_top_mv = volt_val & GENMASK(11, 0);
+		u16 twin_stock_mv = twin_volt_val & GENMASK(11, 0);
 		u16 oc_mv = stock_top_mv + ANCIENT_OC_VOLT_BUMP_MV;
-		u32 new_freq, new_volt;
+		u16 twin_oc_mv = twin_stock_mv + ANCIENT_OC_VOLT_BUMP_MV;
+		u32 new_freq, new_volt, twin_new_freq, twin_new_volt;
 
-		if (!stock_src)
-			pr_warn("Ancient-LTS OC: cluster %u top src fixed, skip\n",
+		if (!stock_src || !twin_stock_src)
+			pr_warn("Ancient-LTS OC: cluster %u top pair src fixed, skip\n",
 				c->cluster_num);
 		else if (oc_lval * XO_RATE != oc_hz || oc_lval > 255)
 			pr_warn("Ancient-LTS OC: bad lval %u, skip\n", oc_lval);
 		else if (c->osm_table[top].frequency >= oc_hz)
 			pr_info("Ancient-LTS OC: cluster %u already >= %lu Hz, skip\n",
 				c->cluster_num, oc_hz);
-		else if (oc_mv > ANCIENT_OC_MAX_VOLT_MV)
-			pr_warn("Ancient-LTS OC: %u mV exceeds %u mV cap, skip\n",
-				oc_mv, ANCIENT_OC_MAX_VOLT_MV);
+		else if (oc_mv > ANCIENT_OC_MAX_VOLT_MV ||
+			 twin_oc_mv > ANCIENT_OC_MAX_VOLT_MV)
+			pr_warn("Ancient-LTS OC: %u/%u mV exceeds %u mV cap, skip\n",
+				oc_mv, twin_oc_mv, ANCIENT_OC_MAX_VOLT_MV);
 		else {
 			new_freq = (freq_val & ~GENMASK(7, 0)) |
 				(oc_lval & GENMASK(7, 0));
-			new_volt = ((u32)c->osm_table[top].virtual_corner << 16) |
-				oc_mv;
+			new_volt = (volt_val & ~GENMASK(11, 0)) | oc_mv;
+			twin_new_freq = (twin_freq_val & ~GENMASK(7, 0)) |
+				(oc_lval & GENMASK(7, 0));
+			twin_new_volt = (twin_volt_val & ~GENMASK(11, 0)) |
+				twin_oc_mv;
 			clk_osm_write_reg(c, new_freq, freq_off);
 			clk_osm_write_reg(c, new_volt, volt_off);
+			clk_osm_write_reg(c, twin_new_freq, twin_freq_off);
+			clk_osm_write_reg(c, twin_new_volt, twin_volt_off);
 			clk_osm_mb(c);
 			if (clk_osm_read_reg(c, freq_off) == new_freq &&
-			    clk_osm_read_reg(c, volt_off) == new_volt) {
+			    clk_osm_read_reg(c, volt_off) == new_volt &&
+			    clk_osm_read_reg(c, twin_freq_off) == twin_new_freq &&
+			    clk_osm_read_reg(c, twin_volt_off) == twin_new_volt) {
 				c->osm_table[top].frequency = oc_hz;
 				c->osm_table[top].open_loop_volt = oc_mv;
-				pr_info("Ancient-LTS OC: cluster %u top -> %lu Hz @ %u mV (stock top %u mV)\n",
-					c->cluster_num, oc_hz, oc_mv,
-					stock_top_mv);
+				c->osm_table[twin].frequency = oc_hz;
+				c->osm_table[twin].open_loop_volt = twin_oc_mv;
+				pr_info("Ancient-LTS OC: cluster %u pair -> %lu Hz @ %u/%u mV\n",
+					c->cluster_num, oc_hz, oc_mv, twin_oc_mv);
 			} else {
-				pr_warn("Ancient-LTS OC: LUT locked by XBL, keeping stock+UV\n");
+				pr_warn("Ancient-LTS OC: LUT pair locked by XBL, keeping stock+UV\n");
 			}
 		}
 	}
