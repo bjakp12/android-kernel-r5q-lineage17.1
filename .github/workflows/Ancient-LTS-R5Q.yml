@@ -274,6 +274,7 @@ jobs:
       - name: Ensure tools/dtc executable (Samsung prebuilt loses +x)
         run: |
           chmod +x tools/dtc || true
+          chmod +x scripts/crypto/fips_crypto_integrity.py || true
           ls -l tools/dtc || true
           ./tools/dtc --version 2>&1 | head -n3 || echo "(tools/dtc not runnable, Makefile.lib falls back to scripts/dtc/dtc)"
 
