@@ -249,6 +249,8 @@ jobs:
             clang --version | head -n2;
             echo "elfedit lookup: [$(which aarch64-linux-gnu-elfedit 2>/dev/null)] (empty => tree --prefix/--gcc-toolchain derivation breaks)";
             echo "shadow check:"; which -a aarch64-linux-gnu-as aarch64-linux-gnu-elfedit arm-linux-gnueabi-as 2>/dev/null || true;
+            ELFDIR="$(dirname "$(which aarch64-linux-gnu-elfedit 2>/dev/null)")";
+            if [ -e "${ELFDIR}/aarch64-linux-gnu-as" ]; then echo "tree will SKIP --prefix (triple tools resolve via --gcc-toolchain)"; else echo "tree will ADD --prefix=${ELFDIR}"; fi;
             run_test() {
               desc="$1"; shift
               if clang "$@" -Werror -fstack-protector-strong -c -x c /dev/null -o /tmp/bisect.o >/tmp/bisect-err.txt 2>&1; then

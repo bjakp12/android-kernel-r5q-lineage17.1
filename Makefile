@@ -491,7 +491,14 @@ ifeq ($(shell $(srctree)/scripts/clang-android.sh $(CC) $(CLANG_FLAGS)), y)
 $(error "Clang with Android --target detected. Did you specify CLANG_TRIPLE?")
 endif
 GCC_TOOLCHAIN_DIR := $(dir $(shell which $(CROSS_COMPILE)elfedit))
+# Ancient-LTS: only add --prefix=<dir> when the dir does NOT hold
+# triple-prefixed tools itself. Ubuntu cross-binutils live as
+# <dir>/aarch64-linux-gnu-as and resolve via --gcc-toolchain; adding
+# --prefix=<dir> there misdirects clang at <dir>/as (host x86_64!) and
+# every -Werror cc-option test fails.
+ifeq ($(wildcard $(GCC_TOOLCHAIN_DIR)$(CROSS_COMPILE)as),)
 CLANG_FLAGS	+= --prefix=$(GCC_TOOLCHAIN_DIR)
+endif
 GCC_TOOLCHAIN	:= $(realpath $(GCC_TOOLCHAIN_DIR)/..)
 endif
 ifneq ($(GCC_TOOLCHAIN),)
