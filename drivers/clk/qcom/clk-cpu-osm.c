@@ -32,6 +32,7 @@
 #include <linux/sched.h>
 #include <linux/cpufreq.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
 #include <dt-bindings/clock/qcom,cpucc-sm8150.h>
@@ -53,13 +54,12 @@
 #define ANCIENT_LTS_OC_ENABLE		1
 #define ANCIENT_LTS_MIN_VOLT_MV		550
 #define ANCIENT_OC_BIG_HZ		2496000000UL
-#define ANCIENT_OC_PRIME_HZ		3091200000UL
-#define ANCIENT_OC_VOLT_BUMP_MV		25
-#define ANCIENT_OC_MAX_VOLT_MV		1050
+#define ANCIENT_OC_PRIME_HZ		2956800000UL
 
 /* Ancient-LTS OC status without dmesg: /sys/kernel/ancient_oc/status
- * state: 0 = stock (OC not attempted), 1 = OC active (HW+SW agree),
- *        2 = OC blocked (LUT write rejected or skipped).
+ * state: 0 = stock (OC not attempted), 1 = OC labels applied (PLL is
+ *        programmed to hw_top whenever the OC table entry is selected),
+ *        2 = reserved (LUT write path retired; LUT is XBL-locked on r5q).
  */
 static unsigned long ancient_oc_hw_top_hz[4];
 static unsigned long ancient_oc_sw_top_hz[4];
@@ -645,12 +645,48 @@ osm_set_index(struct clk_osm *c, unsigned int index, unsigned int num)
 	clk_osm_mb(c);
 }
 
+/* Ancient-LTS OC: program the CPU PLL directly when the OC table entry
+ * is selected. The OSM LUT (FREQ_REG/VOLT_REG) is locked by XBL on r5q,
+ * so probe-time LUT rewrites never stick; the PLL L/MODE registers stay
+ * writable at runtime. Method proven by Pealeap r5q tree ("2.96GHz best"):
+ * Big -> 2.496 GHz (LVAL 130), Prime -> 2.9568 GHz (LVAL 154, 855+ bin).
+ */
+#define ANCIENT_OC_PLL_L_VAL	0x04
+#define ANCIENT_OC_PLL_MODE	0x00
+#define ANCIENT_OC_UPDATE	BIT(22)
+#define ANCIENT_OC_BIG_KHZ	2496000
+#define ANCIENT_OC_PRIME_KHZ	2956800
+
 static int
 osm_cpufreq_target_index(struct cpufreq_policy *policy, unsigned int index)
 {
 	struct clk_osm *c = policy->driver_data;
 
 	osm_set_index(c, index, c->core_num);
+
+	{
+		unsigned int freq = policy->freq_table[index].frequency;
+		u32 oc_lval = 0;
+
+		if (freq == ANCIENT_OC_BIG_KHZ)
+			oc_lval = 130;
+		else if (freq == ANCIENT_OC_PRIME_KHZ)
+			oc_lval = 154;
+
+		if (oc_lval) {
+			u32 mode;
+
+			pr_info("Ancient-LTS OC: lval=%u cluster=%d freq=%u\n",
+				oc_lval, c->cluster_num, freq);
+			writel_relaxed(oc_lval, c->vbase + ANCIENT_OC_PLL_L_VAL);
+			mode = readl_relaxed(c->vbase + ANCIENT_OC_PLL_MODE);
+			writel_relaxed(mode | ANCIENT_OC_UPDATE,
+					c->vbase + ANCIENT_OC_PLL_MODE);
+			udelay(10);
+			writel_relaxed(mode & ~ANCIENT_OC_UPDATE,
+					c->vbase + ANCIENT_OC_PLL_MODE);
+		}
+	}
 
 	sec_smem_clk_osm_add_log_cpufreq(policy->cpu,
 				policy->freq_table[index].frequency, clk_hw_get_name(&c->hw));
@@ -750,6 +786,33 @@ static int osm_cpufreq_cpu_init(struct cpufreq_policy *policy)
 		}
 	}
 	table[i].frequency = CPUFREQ_TABLE_END;
+
+	/* Ancient-LTS OC: relabel the top table entry (software side). The
+	 * hardware clock for this entry is programmed via the PLL at target
+	 * time, since the OSM LUT itself is locked by XBL.
+	 */
+	{
+		int last = (int)i - 1;
+
+		while (last >= 0 &&
+		       (table[last].frequency == CPUFREQ_TABLE_END ||
+			table[last].frequency == CPUFREQ_ENTRY_INVALID))
+			last--;
+		if (last >= 0 && table[last].frequency == 2419200 &&
+		    parent->cluster_num == 2) {
+			table[last].frequency = ANCIENT_OC_BIG_KHZ;
+			table[last].driver_data = ANCIENT_OC_BIG_KHZ;
+			pr_info("Ancient-LTS OC: cpu%u entry %d -> %u kHz\n",
+				policy->cpu, last, table[last].frequency);
+		}
+		if (last >= 0 && table[last].frequency == 2841600 &&
+		    parent->cluster_num == 3) {
+			table[last].frequency = ANCIENT_OC_PRIME_KHZ;
+			table[last].driver_data = ANCIENT_OC_PRIME_KHZ;
+			pr_info("Ancient-LTS OC: cpu%u entry %d -> %u kHz\n",
+				policy->cpu, last, table[last].frequency);
+		}
+	}
 
 	ret = cpufreq_table_validate_and_show(policy, table);
 	if (ret) {
@@ -1041,9 +1104,12 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 			j = i;
 	}
 
-	/* Ancient-LTS OC: update the top duplicate LUT pair for Big (cluster 2)
-	 * and Prime (cluster 3). cpufreq uses this pair to identify the boost
-	 * entry, so both slots must retain the same frequency.
+	/* Ancient-LTS OC: relabel the top duplicate LUT pair in memory only
+	 * for Big (cluster 2) and Prime (cluster 3). The OSM LUT registers
+	 * are locked by XBL, so no hardware writes are attempted here; the
+	 * actual clock is programmed via the PLL when the OC table entry is
+	 * selected (see osm_cpufreq_target_index). OC bins keep stock
+	 * voltage (exempt from the global UV) for stability.
 	 */
 #if ANCIENT_LTS_OC_ENABLE
 	if (j > 0 && j < c->osm_table_size &&
@@ -1052,71 +1118,19 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 			ANCIENT_OC_PRIME_HZ : ANCIENT_OC_BIG_HZ;
 		u32 top = j - 1;
 		u32 twin = j;
-		u32 freq_off = FREQ_REG + top * OSM_REG_SIZE;
-		u32 volt_off = VOLT_REG + top * OSM_REG_SIZE;
-		u32 twin_freq_off = FREQ_REG + twin * OSM_REG_SIZE;
-		u32 twin_volt_off = VOLT_REG + twin * OSM_REG_SIZE;
-		u32 freq_val = clk_osm_read_reg(c, freq_off);
-		u32 volt_val = clk_osm_read_reg(c, volt_off);
-		u32 twin_freq_val = clk_osm_read_reg(c, twin_freq_off);
-		u32 twin_volt_val = clk_osm_read_reg(c, twin_volt_off);
-		u32 stock_src = (freq_val & GENMASK(31, 30)) >> 30;
-		u32 twin_stock_src = (twin_freq_val & GENMASK(31, 30)) >> 30;
-		u32 oc_lval = oc_hz / XO_RATE;
-		u16 stock_top_mv = volt_val & GENMASK(11, 0);
-		u16 twin_stock_mv = twin_volt_val & GENMASK(11, 0);
-		u16 oc_mv = stock_top_mv + ANCIENT_OC_VOLT_BUMP_MV;
-		u16 twin_oc_mv = twin_stock_mv + ANCIENT_OC_VOLT_BUMP_MV;
-		u32 new_freq, new_volt, twin_new_freq, twin_new_volt;
+		u16 stock_top_mv = clk_osm_read_reg(c,
+			VOLT_REG + top * OSM_REG_SIZE) & GENMASK(11, 0);
+		u16 twin_stock_mv = clk_osm_read_reg(c,
+			VOLT_REG + twin * OSM_REG_SIZE) & GENMASK(11, 0);
 
-		/* Default: blocked with the current stock top. Overwritten
-		 * to active only when the pair write verifies by readback.
-		 */
-		ancient_oc_state[c->cluster_num] = 2;
-		ancient_oc_hw_top_hz[c->cluster_num] =
-			c->osm_table[top].frequency;
-
-		if (!stock_src || !twin_stock_src)
-			pr_warn("Ancient-LTS OC: cluster %u top pair src fixed, skip\n",
-				c->cluster_num);
-		else if (oc_lval * XO_RATE != oc_hz || oc_lval > 255)
-			pr_warn("Ancient-LTS OC: bad lval %u, skip\n", oc_lval);
-		else if (c->osm_table[top].frequency >= oc_hz)
-			pr_info("Ancient-LTS OC: cluster %u already >= %lu Hz, skip\n",
-				c->cluster_num, oc_hz);
-		else if (oc_mv > ANCIENT_OC_MAX_VOLT_MV ||
-			 twin_oc_mv > ANCIENT_OC_MAX_VOLT_MV)
-			pr_warn("Ancient-LTS OC: %u/%u mV exceeds %u mV cap, skip\n",
-				oc_mv, twin_oc_mv, ANCIENT_OC_MAX_VOLT_MV);
-		else {
-			new_freq = (freq_val & ~GENMASK(7, 0)) |
-				(oc_lval & GENMASK(7, 0));
-			new_volt = (volt_val & ~GENMASK(11, 0)) | oc_mv;
-			twin_new_freq = (twin_freq_val & ~GENMASK(7, 0)) |
-				(oc_lval & GENMASK(7, 0));
-			twin_new_volt = (twin_volt_val & ~GENMASK(11, 0)) |
-				twin_oc_mv;
-			clk_osm_write_reg(c, new_freq, freq_off);
-			clk_osm_write_reg(c, new_volt, volt_off);
-			clk_osm_write_reg(c, twin_new_freq, twin_freq_off);
-			clk_osm_write_reg(c, twin_new_volt, twin_volt_off);
-			clk_osm_mb(c);
-			if (clk_osm_read_reg(c, freq_off) == new_freq &&
-			    clk_osm_read_reg(c, volt_off) == new_volt &&
-			    clk_osm_read_reg(c, twin_freq_off) == twin_new_freq &&
-			    clk_osm_read_reg(c, twin_volt_off) == twin_new_volt) {
-				c->osm_table[top].frequency = oc_hz;
-				c->osm_table[top].open_loop_volt = oc_mv;
-				c->osm_table[twin].frequency = oc_hz;
-				c->osm_table[twin].open_loop_volt = twin_oc_mv;
-				ancient_oc_state[c->cluster_num] = 1;
-				ancient_oc_hw_top_hz[c->cluster_num] = oc_hz;
-				pr_info("Ancient-LTS OC: cluster %u pair -> %lu Hz @ %u/%u mV\n",
-					c->cluster_num, oc_hz, oc_mv, twin_oc_mv);
-			} else {
-				pr_warn("Ancient-LTS OC: LUT pair locked by XBL, keeping stock+UV\n");
-			}
-		}
+		c->osm_table[top].frequency = oc_hz;
+		c->osm_table[top].open_loop_volt = stock_top_mv;
+		c->osm_table[twin].frequency = oc_hz;
+		c->osm_table[twin].open_loop_volt = twin_stock_mv;
+		ancient_oc_state[c->cluster_num] = 1;
+		ancient_oc_hw_top_hz[c->cluster_num] = oc_hz;
+		pr_info("Ancient-LTS OC: cluster %u top pair -> %lu Hz @ %u/%u mV (stock volts)\n",
+			c->cluster_num, oc_hz, stock_top_mv, twin_stock_mv);
 	}
 #endif /* ANCIENT_LTS_OC_ENABLE */
 
@@ -1135,8 +1149,8 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 		ancient_oc_sw_top_hz[c->cluster_num] =
 			osm_clks_init[c->cluster_num].rate_max[j - 1];
 #if ANCIENT_LTS_OC_ENABLE
-	/* Ancient-LTS: prove the hardware LUT write reached the software
-	 * rate table. Big (2) must end at 2496000000, Prime (3) at 3091200000.
+	/* Ancient-LTS: prove the OC label reached the software rate table.
+	 * Big (2) must end at 2496000000, Prime (3) at 2956800000.
 	 */
 	if (j > 0 && (c->cluster_num == 2 || c->cluster_num == 3))
 		pr_info("Ancient-LTS OC: cluster %u rate_max top %lu Hz (%u entries)\n",
