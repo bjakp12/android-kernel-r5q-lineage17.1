@@ -210,7 +210,8 @@ static DEFINE_MUTEX(selinux_sdcardfs_lock);
 // CONFIG_RKP_KDP
 int selinux_enforcing __kdp_ro;
 #else
-int selinux_enforcing __rticdata;
+/* AOSP: plain .bss, no Knox RTIC section (breaks vmlinux link) */
+int selinux_enforcing;
 #endif
 // ] SEC_SELINUX_PORTING_COMMON
 

@@ -100,7 +100,8 @@ struct policydb policydb;
 #if (defined CONFIG_RKP_KDP && defined CONFIG_SAMSUNG_PRODUCT_SHIP)
 int ss_initialized __kdp_ro;
 #else
-int ss_initialized __rticdata;
+/* AOSP: plain .bss, no Knox RTIC section (breaks vmlinux link) */
+int ss_initialized;
 #endif
 
 /*

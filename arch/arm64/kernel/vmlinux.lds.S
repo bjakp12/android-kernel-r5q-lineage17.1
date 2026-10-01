@@ -68,12 +68,9 @@ jiffies = jiffies_64;
 #define TRAMP_TEXT
 #endif
 
-#define RTIC_BSS					\
-	. = ALIGN(PAGE_SIZE);				\
-	VMLINUX_SYMBOL(__bss_rtic_start) = .;	\
-	KEEP(*(.bss.rtic))			\
-	. = ALIGN(PAGE_SIZE);				\
-	VMLINUX_SYMBOL(__bss_rtic_end) = .;
+/* NOTE: Knox RTIC_BSS removed for AOSP (nothing references
+ * __bss_rtic_start/end; the trailing .bss.rtic output section broke
+ * the vmlinux link with "relocation truncated to fit"). */
 /*
  * The size of the PE/COFF section that covers the kernel image, which
  * runs from stext to _edata, must be a round multiple of the PE/COFF
@@ -246,10 +243,6 @@ SECTIONS
 	STABS_DEBUG
 
 	HEAD_SYMBOLS
-
-	.bss : {			/* bss segment		*/
-         RTIC_BSS
-	}
 }
 
 /*
