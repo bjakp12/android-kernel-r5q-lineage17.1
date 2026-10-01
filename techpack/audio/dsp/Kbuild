@@ -180,6 +180,12 @@ endif
 ifeq ($(call cc-option-yn, -Wmaybe-uninitialized),y)
 CDEFINES += -Wno-error=maybe-uninitialized
 endif
+ifeq ($(call cc-option-yn, -Warray-bounds),y)
+CDEFINES += -Wno-error=array-bounds
+endif
+ifeq ($(call cc-option-yn, -Wstringop-overflow),y)
+CDEFINES += -Wno-error=stringop-overflow
+endif
 
 KBUILD_CPPFLAGS += $(CDEFINES)
 
