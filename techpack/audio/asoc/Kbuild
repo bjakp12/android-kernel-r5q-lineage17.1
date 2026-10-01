@@ -198,6 +198,18 @@ KBUILD_CPPFLAGS += $(CDEFINES)
 ifeq ($(call cc-option-yn, -Wmaybe-uninitialized),y)
 EXTRA_CFLAGS += -Wmaybe-uninitialized
 endif
+# Ancient-LTS: newer compilers promote stale 2019-era patterns to -Werror
+# failures (misleading-indentation, restrict, array-parameter). Downgrade
+# just these classes back to warnings; everything else still errors.
+ifeq ($(call cc-option-yn, -Wmisleading-indentation),y)
+EXTRA_CFLAGS += -Wno-error=misleading-indentation
+endif
+ifeq ($(call cc-option-yn, -Wrestrict),y)
+EXTRA_CFLAGS += -Wno-error=restrict
+endif
+ifeq ($(call cc-option-yn, -Warray-parameter),y)
+EXTRA_CFLAGS += -Wno-error=array-parameter
+endif
 #EXTRA_CFLAGS += -Wmissing-prototypes
 
 ifeq ($(call cc-option-yn, -Wheader-guard),y)

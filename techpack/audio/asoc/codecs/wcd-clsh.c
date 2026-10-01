@@ -50,7 +50,7 @@ static const char *mode_to_str(int mode)
 static const char *state_to_str(u8 state, char *buf, size_t buflen)
 {
 	int i;
-	int cnt = 0;
+	size_t cnt = 0;
 	/*
 	 * This array of strings should match with enum wcd_clsh_state_bit.
 	 */
@@ -70,12 +70,14 @@ static const char *state_to_str(u8 state, char *buf, size_t buflen)
 	for (i = 0; i < ARRAY_SIZE(states); i++) {
 		if (!(state & (1 << i)))
 			continue;
-		cnt = snprintf(buf, buflen - cnt - 1, "%s%s%s", buf,
-			       buf[0] == '\0' ? "[" : "|",
-			       states[i]);
+		if (cnt >= buflen)
+			break;
+		cnt += scnprintf(buf + cnt, buflen - cnt, "%s%s",
+				 cnt == 0 ? "[" : "|",
+				 states[i]);
 	}
-	if (cnt > 0)
-		strlcat(buf + cnt, "]", buflen);
+	if (cnt > 0 && cnt < buflen)
+		scnprintf(buf + cnt, buflen - cnt, "]");
 
 done:
 	if (buf[0] == '\0')

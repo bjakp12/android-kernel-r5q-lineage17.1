@@ -9,6 +9,9 @@ ccflags-y += -Idrivers/media/platform/msm/camera/cam_isp/isp_hw_mgr/hw_utils/irq
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_isp/isp_hw_mgr/isp_hw/include
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_smmu/
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_cpas/include
+# Ancient-LTS: self -I so cam_isp_packet_parser.h -> "cam_ife_hw_mgr.h"
+# resolves when building cam_ife_hw_mgr.o / cam_isp_hw_mgr.o here.
+ccflags-y += -Idrivers/media/platform/msm/camera/cam_isp/isp_hw_mgr/
 
 obj-$(CONFIG_SPECTRA_CAMERA) += hw_utils/ isp_hw/
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_isp_hw_mgr.o cam_ife_hw_mgr.o
