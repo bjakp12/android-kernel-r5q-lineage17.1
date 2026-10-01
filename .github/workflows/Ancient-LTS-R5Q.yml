@@ -202,6 +202,35 @@ jobs:
             echo "Selected toolchain: GCC fallback (both Clang probes failed; see probe-*.log in diagnostics.txt)"
           fi
 
+      - name: Sanitize Clang dir (unshadow GNU cross tools)
+        run: |
+          if [ "${{ steps.tc.outputs.toolchain }}" = "gcc" ]; then
+            echo "GCC selected, nothing to sanitize."
+            exit 0
+          fi
+          # proton/aosp bin/ dirs ship triple-prefixed wrappers (e.g.
+          # aarch64-linux-gnu-elfedit) and sit first in PATH, which poisons
+          # the kernel's `which $(CROSS_COMPILE)elfedit` derivation into
+          # --prefix=<clang-dir> --gcc-toolchain=<clang-dir> (bogus: not a
+          # GCC layout). Clang then falls back to /usr/bin/as (x86_64) and
+          # every -Werror cc-option test fails. Move the shadows aside so
+          # `which aarch64-linux-gnu-*` resolves to /usr/bin; bare `clang`
+          # still resolves to the selected Clang.
+          for TCDIR in "$GITHUB_WORKSPACE/proton/bin" "$GITHUB_WORKSPACE/aosp-clang/bin"; do
+            [ -d "$TCDIR" ] || continue
+            mkdir -p "$TCDIR/.shadowed-by-ancientlts"
+            for f in "$TCDIR"/aarch64-linux-gnu-* "$TCDIR"/arm-linux-gnueabi-*; do
+              [ -e "$f" ] || continue
+              echo "unshadowing: $f"
+              mv "$f" "$TCDIR/.shadowed-by-ancientlts/" || true
+            done
+          done
+          echo "--- which check (triple tools must be /usr/bin) ---"
+          which -a aarch64-linux-gnu-as aarch64-linux-gnu-elfedit aarch64-linux-gnu-ld arm-linux-gnueabi-as 2>/dev/null || true
+          echo "--- clang on PATH (selected Clang must be first) ---"
+          export PATH="$GITHUB_WORKSPACE/proton/bin:$GITHUB_WORKSPACE/aosp-clang/bin:$PATH"
+          which -a clang 2>/dev/null || true
+
       - name: Debug Clang flag compatibility (bisect into clang-debug.log)
         run: |
           if [ "${{ steps.tc.outputs.toolchain }}" = "gcc" ]; then
@@ -219,6 +248,7 @@ jobs:
             echo "=== clang flag bisect (reproduces kernel cc-option -Werror test) ===";
             clang --version | head -n2;
             echo "elfedit lookup: [$(which aarch64-linux-gnu-elfedit 2>/dev/null)] (empty => tree --prefix/--gcc-toolchain derivation breaks)";
+            echo "shadow check:"; which -a aarch64-linux-gnu-as aarch64-linux-gnu-elfedit arm-linux-gnueabi-as 2>/dev/null || true;
             run_test() {
               desc="$1"; shift
               if clang "$@" -Werror -fstack-protector-strong -c -x c /dev/null -o /tmp/bisect.o >/tmp/bisect-err.txt 2>&1; then
@@ -237,7 +267,7 @@ jobs:
             run_test "minus -Werror sanity (expects PASS)" $T $P $G $NIA $COMMON -mlittle-endian -Wno-error
           } | tee clang-debug.log
 
-      - name: Build kernel (Proton Clang, AOSP Clang r416183b, or GCC fallback)
+      - name: Build kernel (Clang first, auto-switch to GCC on error)
         run: |
           set -o pipefail
           export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
@@ -249,8 +279,9 @@ jobs:
           export HOSTCFLAGS_ARG='HOSTCFLAGS=-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon'
           export CROSS_COMPILE="aarch64-linux-gnu-"
           export CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
-          if [ "${{ steps.tc.outputs.toolchain }}" = "gcc" ]; then
-            echo "=== Building with GCC (Ubuntu cross-toolchain, LAST RESORT fallback) ==="
+          echo "${{ steps.tc.outputs.toolchain }}" > actual-toolchain.txt
+          build_gcc() {
+            echo "=== Building with GCC (Ubuntu cross-toolchain) ==="
             aarch64-linux-gnu-gcc --version | head -n1
             make -j$(nproc) ARCH=arm64 \
               "$HOSTCFLAGS_ARG" \
@@ -259,17 +290,15 @@ jobs:
               KBUILD_BUILD_USER="$KBUILD_BUILD_USER" \
               KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" \
               Image.gz-dtb 2>&1 | tee build.log
-          else
+          }
+          build_clang() {
             if [ "${{ steps.tc.outputs.toolchain }}" = "aosp" ]; then
               echo "=== Building with Lineage/AOSP Clang r416183b ==="
               export PATH="$GITHUB_WORKSPACE/aosp-clang/bin:$PATH"
-            elif [ "${{ steps.tc.outputs.toolchain }}" = "proton" ]; then
+            else
               echo "=== Building with Proton Clang ==="
               export PATH="$GITHUB_WORKSPACE/proton/bin:$PATH"
               export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/proton/lib:$LD_LIBRARY_PATH"
-            else
-              echo "Unknown toolchain '${{ steps.tc.outputs.toolchain }}' - refusing to build."
-              exit 1
             fi
             export CLANG_TRIPLE="aarch64-linux-gnu-"
             make -j$(nproc) ARCH=arm64 \
@@ -281,13 +310,27 @@ jobs:
               KBUILD_BUILD_USER="$KBUILD_BUILD_USER" \
               KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" \
               Image.gz-dtb 2>&1 | tee build.log
+          }
+          if [ "${{ steps.tc.outputs.toolchain }}" = "gcc" ]; then
+            build_gcc
+          else
+            if build_clang; then
+              echo "Clang build OK"
+            else
+              echo "=== Clang build FAILED, auto-switching to GCC fallback ==="
+              cp build.log build-clang.log || true
+              echo "gcc-fallback" > actual-toolchain.txt
+              make ARCH=arm64 clean
+              build_gcc
+            fi
           fi
 
       - name: Show build outputs (always)
         if: always()
         run: |
           {
-            echo "toolchain=${{ steps.tc.outputs.toolchain }}";
+            echo "toolchain=$(cat actual-toolchain.txt 2>/dev/null || echo "${{ steps.tc.outputs.toolchain }}")";
+            echo "toolchain_selected=${{ steps.tc.outputs.toolchain }}";
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)";
             ls -lh arch/arm64/boot/ || true;
             echo "--- dtbs ---";
@@ -386,6 +429,8 @@ jobs:
             arch/arm64/boot/Image.gz-dtb
             Ancient-LTS-R5Q-*.zip
             build.log
+            build-clang.log
+            actual-toolchain.txt
             diagnostics.txt
             clang-debug.log
             .config
