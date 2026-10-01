@@ -383,8 +383,15 @@ jobs:
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3 || true
           cp arch/arm64/boot/Image.gz-dtb AnyKernel3/
           cd AnyKernel3
-          # minimal branding
+          # Replace upstream Galaxy Nexus template with our r5q script
+          # (template ships device.name1=maguro/tuna + omap BLOCK + fstab.tuna
+          # patches, which aborts flashing on r5q with a device mismatch).
+          if [ -f ../anykernel-r5q.sh ]; then
+            cp ../anykernel-r5q.sh anykernel.sh
+          fi
+          # minimal branding (kept as fallback)
           sed -i 's/kernel.string=.*/kernel.string=Ancient-LTS-R5Q by bjakp12@ubunt/' anykernel.sh || true
+          grep -m1 "device.name1" anykernel.sh || true
           zip -r9 ../Ancient-LTS-R5Q-$(date +%Y%m%d).zip * -x .git/\* || true
           ls -lh ../*.zip || true
 
