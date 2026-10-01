@@ -1,6 +1,9 @@
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_core/
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_smmu/
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_utils
+# Ancient-LTS: self -I so cam_trace.h -> "cam_req_mgr_core.h" resolves
+# when building cam_req_mgr objects here.
+ccflags-y += -Idrivers/media/platform/msm/camera/cam_req_mgr
 
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_req_mgr_core.o\
 				cam_req_mgr_dev.o \

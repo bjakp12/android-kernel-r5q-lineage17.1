@@ -1,9 +1,11 @@
-# Ancient-LTS: cam_trace.h (cam_utils) includes cam_context.h (cam_core).
+# Ancient-LTS: cam_trace.h (cam_utils) includes cam_context.h (cam_core)
+# and cam_req_mgr_core.h / cam_req_mgr_interface.h (cam_req_mgr).
 # Every camera subdir whose objects pull in cam_trace.h (cam_core, cam_isp,
-# cam_icp, cam_fd, cam_req_mgr, cam_sensor_module/*, ...) needs cam_core on
-# the include path, so export it to this dir and all subdirs.
+# cam_icp, cam_fd, cam_req_mgr, cam_sensor_module/*, ...) needs all three
+# on the include path, so export them to this dir and all subdirs.
 subdir-ccflags-y += -Idrivers/media/platform/msm/camera/cam_core
 subdir-ccflags-y += -Idrivers/media/platform/msm/camera/cam_utils
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera/cam_req_mgr
 
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_req_mgr/
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_hyp_intf/
