@@ -721,6 +721,12 @@ static int osm_cpufreq_cpu_init(struct cpufreq_policy *policy)
 		goto err;
 	}
 
+	/* Ancient-LTS: prove the software cpufreq table top per policy, so
+	 * OC success (or a stock fallback) is visible in dmesg.
+	 */
+	pr_info("Ancient-LTS OSM: cpu%u cpufreq max %u kHz\n",
+		policy->cpu, policy->cpuinfo.max_freq);
+
 	policy->dvfs_possible_from_any_cpu = true;
 	policy->fast_switch_possible = true;
 	policy->driver_data = c;
@@ -1080,6 +1086,15 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 					c->osm_table[i].frequency;
 
 	c->num_entries = osm_clks_init[c->cluster_num].num_rate_max = j;
+#if ANCIENT_LTS_OC_ENABLE
+	/* Ancient-LTS: prove the hardware LUT write reached the software
+	 * rate table. Big (2) must end at 2496000000, Prime (3) at 3091200000.
+	 */
+	if (j > 0 && (c->cluster_num == 2 || c->cluster_num == 3))
+		pr_info("Ancient-LTS OC: cluster %u rate_max top %lu Hz (%u entries)\n",
+			c->cluster_num,
+			osm_clks_init[c->cluster_num].rate_max[j - 1], j);
+#endif
 	return 0;
 }
 

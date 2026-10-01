@@ -279,6 +279,7 @@ jobs:
           ./tools/dtc --version 2>&1 | head -n3 || echo "(tools/dtc not runnable, Makefile.lib falls back to scripts/dtc/dtc)"
 
       - name: Build kernel (Clang first, auto-switch to GCC on error)
+        timeout-minutes: 60
         run: |
           set -o pipefail
           chmod +x tools/dtc || true
