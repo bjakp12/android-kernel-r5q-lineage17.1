@@ -33,8 +33,6 @@
 #include <linux/cpufreq.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
-#include <linux/kobject.h>
-#include <linux/sysfs.h>
 #include <dt-bindings/clock/qcom,cpucc-sm8150.h>
 
 #include <linux/sched/clock.h>
@@ -55,41 +53,6 @@
 #define ANCIENT_LTS_MIN_VOLT_MV		550
 #define ANCIENT_OC_BIG_HZ		2496000000UL
 #define ANCIENT_OC_PRIME_HZ		2956800000UL
-
-/* Ancient-LTS OC status without dmesg: /sys/kernel/ancient_oc/status
- * state: 0 = stock (OC not attempted), 1 = OC labels applied (PLL is
- *        programmed to hw_top whenever the OC table entry is selected),
- *        2 = reserved (LUT write path retired; LUT is XBL-locked on r5q).
- */
-static unsigned long ancient_oc_hw_top_hz[4];
-static unsigned long ancient_oc_sw_top_hz[4];
-static int ancient_oc_state[4];
-
-static ssize_t ancient_oc_status_show(struct kobject *kobj,
-				      struct kobj_attribute *attr, char *buf)
-{
-	static const char * const name[4] = { "l3", "little", "big", "prime" };
-	static const char * const st[3] = { "stock", "active", "blocked" };
-	int i, len = 0;
-
-	for (i = 0; i < 4; i++)
-		len += scnprintf(buf + len, PAGE_SIZE - len,
-			"cluster %d (%s): %s hw_top %lu sw_top %lu\n",
-			i, name[i], st[ancient_oc_state[i] & 0x3],
-			ancient_oc_hw_top_hz[i], ancient_oc_sw_top_hz[i]);
-	return len;
-}
-static struct kobj_attribute ancient_oc_status_attr = __ATTR_RO(status);
-
-static void ancient_oc_sysfs_init(void)
-{
-	struct kobject *kobj = kobject_create_and_add("ancient_oc", kernel_kobj);
-
-	if (!kobj)
-		return;
-	if (sysfs_create_file(kobj, &ancient_oc_status_attr.attr))
-		kobject_put(kobj);
-}
 
 #define OSM_INIT_RATE			300000000UL
 #define XO_RATE				19200000UL
@@ -1127,8 +1090,6 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 		c->osm_table[top].open_loop_volt = stock_top_mv;
 		c->osm_table[twin].frequency = oc_hz;
 		c->osm_table[twin].open_loop_volt = twin_stock_mv;
-		ancient_oc_state[c->cluster_num] = 1;
-		ancient_oc_hw_top_hz[c->cluster_num] = oc_hz;
 		pr_info("Ancient-LTS OC: cluster %u top pair -> %lu Hz @ %u/%u mV (stock volts)\n",
 			c->cluster_num, oc_hz, stock_top_mv, twin_stock_mv);
 	}
@@ -1145,9 +1106,6 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 					c->osm_table[i].frequency;
 
 	c->num_entries = osm_clks_init[c->cluster_num].num_rate_max = j;
-	if (j > 0)
-		ancient_oc_sw_top_hz[c->cluster_num] =
-			osm_clks_init[c->cluster_num].rate_max[j - 1];
 #if ANCIENT_LTS_OC_ENABLE
 	/* Ancient-LTS: prove the OC label reached the software rate table.
 	 * Big (2) must end at 2496000000, Prime (3) at 2956800000.
@@ -1437,7 +1395,6 @@ static int clk_cpu_osm_driver_probe(struct platform_device *pdev)
 		goto provider_err;
 
 	pr_info("OSM CPUFreq driver inited\n");
-	ancient_oc_sysfs_init();
 	return 0;
 
 provider_err:
