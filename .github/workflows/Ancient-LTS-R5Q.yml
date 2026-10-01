@@ -202,6 +202,41 @@ jobs:
             echo "Selected toolchain: GCC fallback (both Clang probes failed; see probe-*.log in diagnostics.txt)"
           fi
 
+      - name: Debug Clang flag compatibility (bisect into clang-debug.log)
+        run: |
+          if [ "${{ steps.tc.outputs.toolchain }}" = "gcc" ]; then
+            echo "GCC selected, skipping clang debug."
+            exit 0
+          fi
+          if [ "${{ steps.tc.outputs.toolchain }}" = "aosp" ]; then
+            export PATH="$GITHUB_WORKSPACE/aosp-clang/bin:$PATH"
+          else
+            export PATH="$GITHUB_WORKSPACE/proton/bin:$PATH"
+            export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/proton/lib:$LD_LIBRARY_PATH"
+          fi
+          command -v clang || exit 0
+          {
+            echo "=== clang flag bisect (reproduces kernel cc-option -Werror test) ===";
+            clang --version | head -n2;
+            echo "elfedit lookup: [$(which aarch64-linux-gnu-elfedit 2>/dev/null)] (empty => tree --prefix/--gcc-toolchain derivation breaks)";
+            run_test() {
+              desc="$1"; shift
+              if clang "$@" -Werror -fstack-protector-strong -c -x c /dev/null -o /tmp/bisect.o >/tmp/bisect-err.txt 2>&1; then
+                echo "PASS: $desc"
+              else
+                echo "FAIL: $desc"
+                cat /tmp/bisect-err.txt || true
+              fi
+            }
+            T="--target=aarch64-linux-gnu"; P="--prefix=/usr/bin/"; G="--gcc-toolchain=/usr"; NIA="-fno-integrated-as"
+            COMMON="-mno-implicit-float -fno-asynchronous-unwind-tables -fno-pic -O2"
+            run_test "full set incl -mlittle-endian" $T $P $G $NIA $COMMON -mlittle-endian
+            run_test "minus -mlittle-endian" $T $P $G $NIA $COMMON
+            run_test "minus --prefix" $T $G $NIA $COMMON -mlittle-endian
+            run_test "plus -mabi=lp64" $T $P $G $NIA $COMMON -mlittle-endian -mabi=lp64
+            run_test "minus -Werror sanity (expects PASS)" $T $P $G $NIA $COMMON -mlittle-endian -Wno-error
+          } | tee clang-debug.log
+
       - name: Build kernel (Proton Clang, AOSP Clang r416183b, or GCC fallback)
         run: |
           set -o pipefail
@@ -260,6 +295,10 @@ jobs:
           } | tee diagnostics.txt
           echo "--- tail build.log ---"
           tail -n 80 build.log 2>/dev/null | tee -a diagnostics.txt || echo "no build.log" | tee -a diagnostics.txt
+          if [ -f clang-debug.log ]; then
+            echo "=== clang-debug.log ===" | tee -a diagnostics.txt
+            cat clang-debug.log | tee -a diagnostics.txt
+          fi
           {
             echo "=== toolchain forensics ===";
             echo "--- proton clang ---";
@@ -348,4 +387,5 @@ jobs:
             Ancient-LTS-R5Q-*.zip
             build.log
             diagnostics.txt
+            clang-debug.log
             .config

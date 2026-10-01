@@ -86,7 +86,14 @@ LDFLAGS		+= -maarch64linuxb
 endif
 UTS_MACHINE	:= aarch64_be
 else
+ifeq ($(cc-name),clang)
+# Ancient-LTS: clang defaults to little-endian for aarch64-linux-gnu and
+# rejects the GCC-only -mlittle-endian flag. Since the kernel's cc-option
+# tests run with -Werror, passing it makes every test (e.g. the
+# -fstack-protector-strong check) fail. Leave it out for clang.
+else
 KBUILD_CPPFLAGS	+= -mlittle-endian
+endif
 CHECKFLAGS	+= -D__AARCH64EL__
 AS		+= -EL
 LD		+= -EL
