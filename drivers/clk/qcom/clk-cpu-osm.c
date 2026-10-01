@@ -43,20 +43,14 @@
 #include "clk-voter.h"
 #include "clk-debug.h"
 
-/* Ancient-LTS: global CPU undervolt for SM8150 (SD855 / r5q).
- * -80mV on every cluster (Little / Big / Prime).
- * Voltages come from the OSM LUT fused in hardware, there is no
- * opp-microvolt in sm8150.dtsi, so this is the only safe place.
- * Floor at 550mV to avoid bootloop on weak bins.
- *
- * Ancient-LTS OC: Big -> 2.496 GHz (req 2.5), Prime -> 3.0912 GHz
- * (req 3.1). OSM step is 19.2 MHz (XO) so exact 2.5/3.1 is
- * unreachable; nearest LVAL below request is used. OC rewrites the
- * top LUT entry and verifies by readback (skipped if XBL locked the
- * LUT). OC bin runs stock_top + 25 mV (exempt from UV); all other
- * bins keep -80mV.
+/* Ancient-LTS power tweaks for SM8150 (SD855 / r5q) - DISABLED for
+ * bring-up: stock voltages and stock top bins until the kernel boots
+ * to homescreen on this unit. Set ANCIENT_LTS_UV_OFFSET_MV back to 80
+ * and ANCIENT_LTS_OC_ENABLE to 1 only after a stable stock boot.
+ * (UV/OC hang weak bins at the Samsung logo during boot boost.)
  */
-#define ANCIENT_LTS_UV_OFFSET_MV	80
+#define ANCIENT_LTS_UV_OFFSET_MV	0
+#define ANCIENT_LTS_OC_ENABLE		0
 #define ANCIENT_LTS_MIN_VOLT_MV		550
 #define ANCIENT_OC_BIG_HZ		2496000000UL
 #define ANCIENT_OC_PRIME_HZ		3091200000UL
@@ -1010,6 +1004,10 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 	/* Ancient-LTS OC: rewrite top LUT entry for Big (cluster 2) and
 	 * Prime (cluster 3). Little (cluster 1) stays stock + UV.
 	 */
+	/* Ancient-LTS OC: disabled for bring-up (ANCIENT_LTS_OC_ENABLE=0).
+	 * Enable only after a stable stock boot.
+	 */
+#if ANCIENT_LTS_OC_ENABLE
 	if (j > 0 && (c->cluster_num == 2 || c->cluster_num == 3)) {
 		unsigned long oc_hz = (c->cluster_num == 3) ?
 			ANCIENT_OC_PRIME_HZ : ANCIENT_OC_BIG_HZ;
@@ -1058,6 +1056,7 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 			}
 		}
 	}
+#endif /* ANCIENT_LTS_OC_ENABLE */
 
 	osm_clks_init[c->cluster_num].rate_max = devm_kcalloc(&pdev->dev,
 						 j, sizeof(unsigned long),
