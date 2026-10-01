@@ -284,8 +284,11 @@ jobs:
           chmod +x tools/dtc || true
           export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
           export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
-          # -Wno-error=implicit-*: Clang >=16 menjadikan ini error; code 4.14 butuh diturunkan ke warning.
-          export KCFLAGS="-O2 -fno-pic -fno-pie -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
+          # -O2: performa; -Wno-error=implicit-*: Clang >=16 menjadikan ini error; code 4.14 butuh diturunkan ke warning.
+          # NOTE: JANGAN tambah -fno-pic/-fno-pie di sini. Defconfig pakai
+          # CONFIG_RELOCATABLE=y + CONFIG_RANDOMIZE_BASE=y (KASLR); tanpa PIE
+          # kernel bisa hang di logo Samsung karena slide KASLR.
+          export KCFLAGS="-O2 -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
           # -fcommon: GCC >=10 default -fno-common, dtc era 4.14 (yylloc di
           # lexer+parser) gagal link tanpa ini. Hanya untuk HOST tools.
           export HOSTCFLAGS_ARG='HOSTCFLAGS=-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon'
