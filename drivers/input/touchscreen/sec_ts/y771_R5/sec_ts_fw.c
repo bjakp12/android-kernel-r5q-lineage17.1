@@ -719,7 +719,7 @@ err:
 
 int sec_ts_firmware_update_on_probe(struct sec_ts_data *ts, bool force_update)
 {
-	const struct firmware *fw_entry;
+	const struct firmware *fw_entry = NULL;
 	char fw_path[SEC_TS_MAX_FW_PATH];
 	int result = -1;
 	int ii = 0;
@@ -757,6 +757,16 @@ int sec_ts_firmware_update_on_probe(struct sec_ts_data *ts, bool force_update)
 	/* Loading Firmware */
 	if (request_firmware(&fw_entry, fw_path, &ts->client->dev) !=  0) {
 		input_err(true, &ts->client->dev, "%s: firmware is not available\n", __func__);
+		/*
+		 * The r5q firmware blobs are proprietary and are not shipped in
+		 * this kernel tree. A controller with valid on-device firmware can
+		 * operate normally without an update; only recovery requires a blob.
+		 */
+		if (!force_update) {
+			input_info(true, &ts->client->dev,
+				   "%s: use controller firmware without update\n", __func__);
+			result = 0;
+		}
 		goto err_request_fw;
 	}
 	input_info(true, &ts->client->dev, "%s: request firmware done! size = %d\n", __func__, (int)fw_entry->size);

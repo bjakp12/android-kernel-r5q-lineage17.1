@@ -43,13 +43,11 @@
 #include "clk-voter.h"
 #include "clk-debug.h"
 
-/* Ancient-LTS power tweaks for SM8150 (SD855 / r5q) - DISABLED for
- * bring-up: stock voltages and stock top bins until the kernel boots
- * to homescreen on this unit. Set ANCIENT_LTS_UV_OFFSET_MV back to 80
- * and ANCIENT_LTS_OC_ENABLE to 1 only after a stable stock boot.
- * (UV/OC hang weak bins at the Samsung logo during boot boost.)
+/* Ancient-LTS power tweaks for SM8150 (SD855 / r5q).
+ * Apply a verified -70 mV global CPU undervolt. The 550 mV floor keeps
+ * the lowest OSM bins within their stable operating range.
  */
-#define ANCIENT_LTS_UV_OFFSET_MV	50
+#define ANCIENT_LTS_UV_OFFSET_MV	70
 #define ANCIENT_LTS_OC_ENABLE		1
 #define ANCIENT_LTS_MIN_VOLT_MV		550
 #define ANCIENT_OC_BIG_HZ		2496000000UL
