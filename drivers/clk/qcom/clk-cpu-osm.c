@@ -49,8 +49,8 @@
  * and ANCIENT_LTS_OC_ENABLE to 1 only after a stable stock boot.
  * (UV/OC hang weak bins at the Samsung logo during boot boost.)
  */
-#define ANCIENT_LTS_UV_OFFSET_MV	0
-#define ANCIENT_LTS_OC_ENABLE		0
+#define ANCIENT_LTS_UV_OFFSET_MV	50
+#define ANCIENT_LTS_OC_ENABLE		1
 #define ANCIENT_LTS_MIN_VOLT_MV		550
 #define ANCIENT_OC_BIG_HZ		2496000000UL
 #define ANCIENT_OC_PRIME_HZ		3091200000UL

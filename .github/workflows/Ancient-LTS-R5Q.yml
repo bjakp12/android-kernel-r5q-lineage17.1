@@ -288,7 +288,7 @@ jobs:
           # NOTE: JANGAN tambah -fno-pic/-fno-pie di sini. Defconfig pakai
           # CONFIG_RELOCATABLE=y + CONFIG_RANDOMIZE_BASE=y (KASLR); tanpa PIE
           # kernel bisa hang di logo Samsung karena slide KASLR.
-          export KCFLAGS="-O2 -Wno-error=implicit-function-declaration -Wno-error=implicit-int"
+          export KCFLAGS="-O2 -Wno-error=implicit-function-declaration -Wno-error=implicit-int -fno-pic -fno-pie"
           # -fcommon: GCC >=10 default -fno-common, dtc era 4.14 (yylloc di
           # lexer+parser) gagal link tanpa ini. Hanya untuk HOST tools.
           export HOSTCFLAGS_ARG='HOSTCFLAGS=-Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89 -fcommon'
