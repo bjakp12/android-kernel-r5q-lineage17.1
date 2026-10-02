@@ -51,7 +51,7 @@
 #define ANCIENT_LTS_UV_OFFSET_MV	100
 #define ANCIENT_LTS_OC_ENABLE		1
 #define ANCIENT_LTS_MIN_VOLT_MV		550
-#define ANCIENT_OC_BIG_HZ		2688000000UL
+#define ANCIENT_OC_BIG_HZ		2899200000UL
 #define ANCIENT_OC_PRIME_HZ		3091200000UL
 
 #define OSM_INIT_RATE			300000000UL
@@ -612,14 +612,14 @@ osm_set_index(struct clk_osm *c, unsigned int index, unsigned int num)
  * is selected. The OSM LUT (FREQ_REG/VOLT_REG) is locked by XBL on r5q,
  * so probe-time LUT rewrites never stick; the PLL L/MODE registers stay
  * writable at runtime. Method proven by Pealeap r5q tree ("2.96GHz best"):
- * Big -> 2.688 GHz (LVAL 140, nearest step below 2.7),
+ * Big -> 2.8992 GHz (LVAL 151, nearest step below 2.91),
  * Prime -> 3.0912 GHz (LVAL 161, nearest step below 3.1).
- * OSM step is 19.2 MHz so exact 2.7/3.1 is unreachable.
+ * OSM step is 19.2 MHz so exact 2.91/3.1 is unreachable.
  */
 #define ANCIENT_OC_PLL_L_VAL	0x04
 #define ANCIENT_OC_PLL_MODE	0x00
 #define ANCIENT_OC_UPDATE	BIT(22)
-#define ANCIENT_OC_BIG_KHZ	2688000
+#define ANCIENT_OC_BIG_KHZ	2899200
 #define ANCIENT_OC_PRIME_KHZ	3091200
 
 static int
@@ -634,7 +634,7 @@ osm_cpufreq_target_index(struct cpufreq_policy *policy, unsigned int index)
 		u32 oc_lval = 0;
 
 		if (freq == ANCIENT_OC_BIG_KHZ)
-			oc_lval = 140;
+			oc_lval = 151;
 		else if (freq == ANCIENT_OC_PRIME_KHZ)
 			oc_lval = 161;
 
@@ -1073,8 +1073,10 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 	 * for Big (cluster 2) and Prime (cluster 3). The OSM LUT registers
 	 * are locked by XBL, so no hardware writes are attempted here; the
 	 * actual clock is programmed via the PLL when the OC table entry is
-	 * selected (see osm_cpufreq_target_index). OC bins keep stock
-	 * voltage (exempt from the global UV) for stability.
+	 * selected (see osm_cpufreq_target_index). The OC bins get the same
+	 * UV cut as every other bin; the voltage write is attempted on the
+	 * hardware VOLT_REG and verified by readback, falling back to stock
+	 * volts if XBL rejects it.
 	 */
 #if ANCIENT_LTS_OC_ENABLE
 	if (j > 0 && j < c->osm_table_size &&
@@ -1083,17 +1085,42 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 			ANCIENT_OC_PRIME_HZ : ANCIENT_OC_BIG_HZ;
 		u32 top = j - 1;
 		u32 twin = j;
-		u16 stock_top_mv = clk_osm_read_reg(c,
-			VOLT_REG + top * OSM_REG_SIZE) & GENMASK(11, 0);
-		u16 twin_stock_mv = clk_osm_read_reg(c,
-			VOLT_REG + twin * OSM_REG_SIZE) & GENMASK(11, 0);
+		u32 volt_off = VOLT_REG + top * OSM_REG_SIZE;
+		u32 twin_volt_off = VOLT_REG + twin * OSM_REG_SIZE;
+		u32 volt_val = clk_osm_read_reg(c, volt_off);
+		u32 twin_volt_val = clk_osm_read_reg(c, twin_volt_off);
+		u16 stock_top_mv = volt_val & GENMASK(11, 0);
+		u16 twin_stock_mv = twin_volt_val & GENMASK(11, 0);
+		u16 oc_mv = (stock_top_mv > (ANCIENT_LTS_MIN_VOLT_MV +
+				ANCIENT_LTS_UV_OFFSET_MV)) ?
+			stock_top_mv - ANCIENT_LTS_UV_OFFSET_MV :
+			ANCIENT_LTS_MIN_VOLT_MV;
+		u16 twin_oc_mv = (twin_stock_mv > (ANCIENT_LTS_MIN_VOLT_MV +
+				ANCIENT_LTS_UV_OFFSET_MV)) ?
+			twin_stock_mv - ANCIENT_LTS_UV_OFFSET_MV :
+			ANCIENT_LTS_MIN_VOLT_MV;
+		u32 new_volt = (volt_val & ~GENMASK(11, 0)) | oc_mv;
+		u32 twin_new_volt = (twin_volt_val & ~GENMASK(11, 0)) |
+			twin_oc_mv;
 
 		c->osm_table[top].frequency = oc_hz;
-		c->osm_table[top].open_loop_volt = stock_top_mv;
 		c->osm_table[twin].frequency = oc_hz;
-		c->osm_table[twin].open_loop_volt = twin_stock_mv;
-		pr_info("Ancient-LTS OC: cluster %u top pair -> %lu Hz @ %u/%u mV (stock volts)\n",
-			c->cluster_num, oc_hz, stock_top_mv, twin_stock_mv);
+		clk_osm_write_reg(c, new_volt, volt_off);
+		clk_osm_write_reg(c, twin_new_volt, twin_volt_off);
+		clk_osm_mb(c);
+		if (clk_osm_read_reg(c, volt_off) == new_volt &&
+		    clk_osm_read_reg(c, twin_volt_off) == twin_new_volt) {
+			c->osm_table[top].open_loop_volt = oc_mv;
+			c->osm_table[twin].open_loop_volt = twin_oc_mv;
+			pr_info("Ancient-LTS OC: cluster %u top pair -> %lu Hz @ %u/%u mV (UV applied)\n",
+				c->cluster_num, oc_hz, oc_mv, twin_oc_mv);
+		} else {
+			c->osm_table[top].open_loop_volt = stock_top_mv;
+			c->osm_table[twin].open_loop_volt = twin_stock_mv;
+			pr_info("Ancient-LTS OC: cluster %u top pair -> %lu Hz @ %u/%u mV (volt locked, stock kept)\n",
+				c->cluster_num, oc_hz, stock_top_mv,
+				twin_stock_mv);
+		}
 	}
 #endif /* ANCIENT_LTS_OC_ENABLE */
 
@@ -1110,7 +1137,7 @@ static int clk_osm_read_lut(struct platform_device *pdev, struct clk_osm *c)
 	c->num_entries = osm_clks_init[c->cluster_num].num_rate_max = j;
 #if ANCIENT_LTS_OC_ENABLE
 	/* Ancient-LTS: prove the OC label reached the software rate table.
-	 * Big (2) must end at 2688000000, Prime (3) at 3091200000.
+	 * Big (2) must end at 2899200000, Prime (3) at 3091200000.
 	 */
 	if (j > 0 && (c->cluster_num == 2 || c->cluster_num == 3))
 		pr_info("Ancient-LTS OC: cluster %u rate_max top %lu Hz (%u entries)\n",
